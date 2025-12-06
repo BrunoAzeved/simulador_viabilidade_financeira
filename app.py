@@ -1,175 +1,140 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 
 # Configuração da Página
-st.set_page_config(page_title="Simulador Avançado: Creta vs BYD", layout="wide")
+st.set_page_config(page_title="Simulador Master: Creta vs BYD", layout="wide")
 
-st.title("🚗 Simulador Financeiro com Juros Compostos")
-st.markdown("Comparativo considerando o **Custo de Oportunidade Exponencial** do capital investido.")
+st.title("📈 Simulador com Reinvestimento de Economia")
+st.markdown("""
+Esta ferramenta simula o cenário onde **toda a economia gerada** (combustível + manutenção) 
+é imediatamente **reinvestida** na mesma taxa do CDI.
+""")
 
-# --- SIDEBAR: VARIÁVEIS DE ENTRADA ---
-st.sidebar.header("1. Perfil de Uso")
-km_mensal = st.sidebar.number_input("KM Rodados por Mês", value=1500, step=50)
-pct_estrada = st.sidebar.slider("% Uso em Estrada", 0, 100, 50)
-pct_cidade = 100 - pct_estrada
+# --- SIDEBAR: VARIÁVEIS ---
+st.sidebar.header("1. Premissas de Mercado")
+taxa_cdi_anual = st.sidebar.number_input("Taxa CDI Anual (%)", value=11.25, step=0.1)
+preco_gasolina = st.sidebar.number_input("Preço Gasolina (R$)", value=6.00)
+preco_kwh = st.sidebar.number_input("Preço Energia (R$)", value=0.90)
+anos = st.sidebar.slider("Tempo de Análise (Anos)", 1, 10, 5)
 
-st.sidebar.header("2. Dados Econômicos")
-preco_gasolina = st.sidebar.number_input("Preço Gasolina (R$/L)", value=6.00)
-preco_kwh = st.sidebar.number_input("Preço Energia (R$/kWh)", value=0.90)
-taxa_cdi = st.sidebar.number_input("Taxa Selic/CDI Anual (%)", value=11.25) / 100
-anos_analise = st.sidebar.slider("Horizonte de Análise (Anos)", 1, 15, 10)
+st.sidebar.header("2. Perfil de Uso")
+km_mensal = st.sidebar.number_input("KM Mensal", value=1500)
+pct_estrada = st.sidebar.slider("% em Estrada", 0, 100, 50)
 
-st.sidebar.header("3. Carro Atual (Creta)")
-valor_venda_carro1 = st.sidebar.number_input("Valor de Venda (R$)", value=75000)
-consumo_cidade_carro1 = st.sidebar.number_input(f"Consumo Cidade Creta (km/l)", value=8.5)
-consumo_estrada_carro1 = st.sidebar.number_input(f"Consumo Estrada Creta (km/l)", value=11.0)
-fixo_carro1 = st.sidebar.number_input("Custo Fixo Anual Creta (IPVA+Seguro+Manut)", value=12800) 
-# Soma aproximada: 3k IPVA + 3.8k Seguro + 6k Manut = 12.8k
+st.sidebar.header("3. O Creta (Carro Atual)")
+venda_creta = st.sidebar.number_input("Valor Venda Creta (R$)", value=75000)
+consumo_creta_cid = st.sidebar.number_input("Consumo Cidade Creta (km/l)", value=8.5)
+consumo_creta_est = st.sidebar.number_input("Consumo Estrada Creta (km/l)", value=11.0)
+# Custos Anuais Creta
+ipva_creta = st.sidebar.number_input("IPVA Creta (Anual)", value=3000)
+seguro_creta = st.sidebar.number_input("Seguro Creta (Anual)", value=3800)
+manut_creta = st.sidebar.number_input("Manutenção/Risco Creta (Anual)", value=6000)
 
-st.sidebar.header("4. Carro Novo (BYD King)")
-valor_compra_carro2 = st.sidebar.number_input("Preço de Compra (R$)", value=145000)
-consumo_ev_kwh = st.sidebar.number_input("Consumo Elétrico (kWh/100km)", value=14.0)
-consumo_hibrido_estrada = st.sidebar.number_input(f"Consumo Híbrido Estrada (km/l)", value=20.0)
-fixo_carro2 = st.sidebar.number_input("Custo Fixo Anual BYD (IPVA+Seguro+Manut)", value=13800)
-# Soma aproximada: 5.8k IPVA + 7k Seguro + 1k Manut = 13.8k
+st.sidebar.header("4. O BYD King (Novo)")
+compra_byd = st.sidebar.number_input("Valor Compra BYD (R$)", value=145000)
+consumo_byd_kwh = st.sidebar.number_input("Consumo EV (kWh/100km)", value=14.0)
+consumo_byd_hibrido = st.sidebar.number_input("Consumo Híbrido Est (km/l)", value=20.0)
+# Custos Anuais BYD
+ipva_byd = st.sidebar.number_input("IPVA BYD (Anual)", value=5800)
+seguro_byd = st.sidebar.number_input("Seguro BYD (Anual)", value=7000)
+manut_byd = st.sidebar.number_input("Manutenção BYD (Anual)", value=1000)
 
-# --- CÁLCULOS OPERACIONAIS (MENSAL/ANUAL) ---
+# --- CÁLCULOS ---
 
-# 1. Distâncias
-km_cidade = km_mensal * (pct_cidade / 100)
-km_estrada = km_mensal * (pct_estrada / 100)
+# 1. Taxas e Distâncias
+taxa_mensal = (1 + taxa_cdi_anual/100)**(1/12) - 1
+km_cid = km_mensal * ((100-pct_estrada)/100)
+km_est = km_mensal * (pct_estrada/100)
 
-# 2. Custos Combustível Anual - Creta
-custo_cidade_c1 = (km_cidade / consumo_cidade_carro1) * preco_gasolina
-custo_estrada_c1 = (km_estrada / consumo_estrada_carro1) * preco_gasolina
-total_combustivel_c1_anual = (custo_cidade_c1 + custo_estrada_c1) * 12
+# 2. Custo Combustível Mensal
+# Creta
+gasto_creta_mes = ((km_cid/consumo_creta_cid) + (km_est/consumo_creta_est)) * preco_gasolina
+# BYD
+gasto_byd_mes = ((km_cid/100)*consumo_byd_kwh*preco_kwh) + ((km_est/consumo_byd_hibrido)*preco_gasolina)
 
-# 3. Custos Combustível Anual - BYD
-custo_cidade_c2 = (km_cidade / 100) * consumo_ev_kwh * preco_kwh
-custo_estrada_c2 = (km_estrada / consumo_hibrido_estrada) * preco_gasolina
-total_combustivel_c2_anual = (custo_cidade_c2 + custo_estrada_c2) * 12
+# 3. Custo Fixo Mensalizado (Provisão)
+fixo_creta_mes = (ipva_creta + seguro_creta + manut_creta) / 12
+fixo_byd_mes = (ipva_byd + seguro_byd + manut_byd) / 12
 
-# 4. Economia Operacional Líquida
-# (Economia Gasolina) - (Diferença de Custo Fixo)
-economia_gasolina = total_combustivel_c1_anual - total_combustivel_c2_anual
-diferenca_fixo = fixo_carro2 - fixo_carro1 # Quanto o BYD é mais caro nos fixos
-beneficio_liquido_anual = economia_gasolina - diferenca_fixo
+# 4. Fluxo de Caixa Mensal
+# A "Economia Total" é a diferença de tudo que sai do bolso
+fluxo_saida_creta = gasto_creta_mes + fixo_creta_mes
+fluxo_saida_byd = gasto_byd_mes + fixo_byd_mes
+economia_mensal_total = fluxo_saida_creta - fluxo_saida_byd
 
-# --- CÁLCULO FINANCEIRO (JUROS COMPOSTOS) ---
+# --- SIMULAÇÃO MÊS A MÊS ---
 
-investimento_inicial = valor_compra_carro2 - valor_venda_carro1
+meses = anos * 12
+saldo_comparativo = [] # Saldo da diferença patrimonial
+investimento_inicial = compra_byd - venda_creta
 
-# Listas para os gráficos
-anos = list(range(anos_analise + 1))
-saldo_devedor = [] # O "Buraco" financeiro considerando juros
-economia_acumulada_sem_juros = [] # Apenas a soma do dinheiro economizado (visão linear)
-custo_oportunidade_acumulado = [] # Quanto o dinheiro teria rendido
+# Começamos com um "buraco" de -70k (que é o dinheiro que tiramos do investimento)
+saldo_atual = -investimento_inicial 
 
-saldo_atual = -investimento_inicial
-capital_hipotetico = investimento_inicial # O dinheiro rendendo no banco
+eixo_x = []
 
-saldo_devedor.append(saldo_atual)
-custo_oportunidade_acumulado.append(0)
-economia_acumulada_sem_juros.append(0)
-
-payback_encontrado = False
-ano_payback = 0
-
-for ano in range(1, anos_analise + 1):
-    # 1. O Saldo Devedor cresce pelos juros (você deixou de ganhar esse rendimento)
-    juros_sobre_saldo = saldo_atual * taxa_cdi
+for m in range(meses + 1):
+    eixo_x.append(m)
+    saldo_comparativo.append(saldo_atual)
     
-    # 2. Você abate do saldo a economia que fez no ano
-    saldo_atual = saldo_atual + juros_sobre_saldo + beneficio_liquido_anual
-    saldo_devedor.append(saldo_atual)
+    # Lógica do Reinvestimento:
+    # 1. O saldo devedor cresce (custo de oportunidade)
+    # 2. A economia mensal entra abatendo esse saldo (como se fosse um aporte)
+    # Matematicamente: Investir a economia é igual a abater o custo de oportunidade
     
-    # Verifica Payback
-    if saldo_atual >= 0 and not payback_encontrado:
-        payback_encontrado = True
-        ano_payback = ano
-        
-    # Cálculos auxiliares para gráfico comparativo
-    capital_hipotetico = capital_hipotetico * (1 + taxa_cdi)
-    custo_oportunidade_acumulado.append(capital_hipotetico - investimento_inicial)
-    economia_acumulada_sem_juros.append(beneficio_liquido_anual * ano)
+    juros = saldo_atual * taxa_mensal
+    saldo_atual = saldo_atual + juros + economia_mensal_total
 
-# --- DASHBOARD ---
+# --- RESULTADOS ---
 
+st.divider()
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Economia Gasolina (Ano)", f"R$ {economia_gasolina:,.2f}")
-col2.metric("Diferença Custos Fixos (Ano)", f"R$ {diferenca_fixo:,.2f}", help="IPVA/Seguro mais caros vs Manutenção mais barata")
-col3.metric("Benefício Líquido (Ano)", f"R$ {beneficio_liquido_anual:,.2f}", help="O que sobra no bolso por ano (sem contar juros)")
-col4.metric("Investimento Inicial", f"R$ {investimento_inicial:,.2f}")
+
+col1.metric("Economia Mensal Total", f"R$ {economia_mensal_total:,.2f}", 
+            help="Soma da economia de gasolina + provisão de manutenção/seguro/IPVA mensalizados.")
+col2.metric("Custo Capital (Inicial)", f"R$ {-investimento_inicial:,.2f}")
+
+saldo_final = saldo_comparativo[-1]
+cor_final = "green" if saldo_final > 0 else "red"
+col3.metric(f"Saldo Final em {anos} Anos", f"R$ {saldo_final:,.2f}", delta_color="normal" if saldo_final > 0 else "inverse")
+
+payback_mes = next((i for i, x in enumerate(saldo_comparativo) if x >= 0), None)
+payback_texto = f"{payback_mes} meses ({payback_mes/12:.1f} anos)" if payback_mes else "Não atingido no período"
+col4.metric("Payback (Tempo de Retorno)", payback_texto)
 
 st.divider()
 
-# --- VEREDITO COMPOSTO ---
-st.subheader("📊 Análise de Viabilidade Real")
+# --- GRÁFICO ---
 
-if payback_encontrado:
-    st.success(f"✅ O carro SE PAGA em {ano_payback} anos (considerando juros compostos).")
-    msg_veredito = "Financeiramente VIÁVEL a longo prazo."
-else:
-    st.error(f"❌ O carro NÃO SE PAGA em {anos_analise} anos.")
-    msg_veredito = "Financeiramente INVIÁVEL (Os juros do investimento ganham da economia)."
+fig = go.Figure()
 
-st.markdown(f"""
-    > **Resumo:** {msg_veredito}  
-    > Para o BYD valer a pena financeiramente, a linha verde (Saldo) precisa cruzar a linha zero para cima.
-    > Se a linha continuar caindo, significa que os juros sobre os R$ {investimento_inicial/1000:.0f}k crescem mais rápido do que você consegue economizar em gasolina.
+fig.add_trace(go.Scatter(
+    x=eixo_x, 
+    y=saldo_comparativo,
+    mode='lines',
+    name='Diferença Patrimonial',
+    fill='tozeroy',
+    line=dict(color='green' if saldo_final > 0 else 'crimson', width=3)
+))
+
+fig.add_hline(y=0, line_dash="dash", line_color="white", annotation_text="Ponto de Equilíbrio (Zero)")
+
+fig.update_layout(
+    title="Evolução Patrimonial: Investindo a Economia Mensalmente",
+    xaxis_title="Meses",
+    yaxis_title="Saldo Acumulado (R$)",
+    template="plotly_dark",
+    hovermode="x unified"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+st.info(f"""
+**Como ler este gráfico:**
+- A linha começa negativa em **R$ {-investimento_inicial:,.0f}** (o valor que você desembolsou).
+- Todo mês, a linha sobe impulsionada pela **Economia Mensal de R$ {economia_mensal_total:,.2f}**.
+- A inclinação da curva considera que essa economia está **rendendo juros compostos** (amortizando o custo de oportunidade).
+- Se a linha cruzar o zero, a troca do carro se pagou financeiramente.
 """)
-
-# --- GRÁFICOS ---
-
-tab1, tab2 = st.tabs(["Curva de Payback Real", "Batalha: Juros vs Economia"])
-
-with tab1:
-    fig_payback = go.Figure()
-    
-    # Linha do Saldo
-    fig_payback.add_trace(go.Scatter(
-        x=anos, y=saldo_devedor, 
-        mode='lines+markers', 
-        name='Saldo Financeiro Real',
-        line=dict(color='green' if payback_encontrado else 'red', width=4)
-    ))
-    
-    # Linha Zero
-    fig_payback.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Ponto de Equilíbrio")
-    
-    fig_payback.update_layout(
-        title="Evolução do Saldo (Considerando Juros Compostos)",
-        xaxis_title="Anos",
-        yaxis_title="Saldo (R$)",
-        hovermode="x unified"
-    )
-    st.plotly_chart(fig_payback, use_container_width=True)
-    st.caption("Nota: Se a linha aponta para baixo, o 'buraco' está aumentando: você perde mais dinheiro deixando de investir do que economiza andando.")
-
-with tab2:
-    # Gráfico comparando as forças
-    fig_batalha = go.Figure()
-    
-    fig_batalha.add_trace(go.Scatter(
-        x=anos, y=custo_oportunidade_acumulado,
-        mode='lines', name='Ganho Perdido (CDB Acumulado)',
-        line=dict(color='red', dash='dot'),
-        fill='tozeroy'
-    ))
-    
-    fig_batalha.add_trace(go.Scatter(
-        x=anos, y=economia_acumulada_sem_juros,
-        mode='lines', name='Economia Acumulada do Carro',
-        line=dict(color='blue', width=3)
-    ))
-    
-    fig_batalha.update_layout(
-        title="A Batalha: O que o dinheiro renderia (Vermelho) vs. O que o carro economiza (Azul)",
-        xaxis_title="Anos",
-        yaxis_title="Valor Acumulado (R$)"
-    )
-    st.plotly_chart(fig_batalha, use_container_width=True)
-    st.info("Se a área vermelha for maior que a linha azul, o banco ganha do carro.")
