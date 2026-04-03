@@ -1,155 +1,108 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
 
-# Configuração da Página
-st.set_page_config(page_title="Simulador: Creta vs BYD King", layout="wide")
+# Configuração da página
+st.set_page_config(page_title="Compra vs. Assinatura de Carro", layout="wide")
 
-st.title("🚗 Simulador de Viabilidade Financeira: Troca de Carro")
-st.markdown("Analise o **Payback**, **ROE** e o **Custo Total de Propriedade** ajustando as variáveis abaixo.")
+st.title("🚗 Comparador: Comprar ou Assinar?")
+st.markdown("""
+Esta ferramenta compara o custo total de propriedade de um carro comprado (à vista ou financiado) 
+versus o custo de um serviço de assinatura mensal, considerando o **custo de oportunidade** do seu dinheiro.
+""")
 
-# --- SIDEBAR: VARIÁVEIS DE ENTRADA ---
-st.sidebar.header("1. Perfil de Uso")
-km_mensal = st.sidebar.number_input("KM Rodados por Mês", value=1500, step=50)
-pct_estrada = st.sidebar.slider("% Uso em Estrada", 0, 100, 50)
-pct_cidade = 100 - pct_estrada
+# --- SIDEBAR: INPUTS ---
+st.sidebar.header("🔧 Parâmetros de Comparação")
+meses = st.sidebar.slider("Período da análise (meses)", 12, 60, 36)
+taxa_selic = st.sidebar.number_input("Rendimento mensal esperado do investimento (%)", value=0.8, step=0.1) / 100
 
-st.sidebar.header("2. Dados Econômicos")
-preco_gasolina = st.sidebar.number_input("Preço Gasolina (R$/L)", value=6.00)
-preco_kwh = st.sidebar.number_input("Preço Energia (R$/kWh)", value=0.90)
-taxa_cdi = st.sidebar.number_input("Taxa de Rendimento Anual (CDB %)", value=11.25) / 100
+st.sidebar.subheader("💰 Cenário: Compra")
+valor_carro = st.sidebar.number_input("Preço do carro (R$)", value=100000)
+entrada = st.sidebar.number_input("Valor da entrada (ou valor total se à vista) (R$)", value=100000)
+depreciacao_anual = st.sidebar.number_input("Depreciação anual estimada (%)", value=10.0) / 100
 
-st.sidebar.header("3. Carro Atual (Ex: Creta)")
-nome_carro1 = st.sidebar.text_input("Nome Carro Atual", "Hyundai Creta 1.6")
-valor_venda_carro1 = st.sidebar.number_input("Valor de Venda (R$)", value=75000)
-consumo_cidade_carro1 = st.sidebar.number_input(f"Consumo Cidade {nome_carro1} (km/l)", value=8.5)
-consumo_estrada_carro1 = st.sidebar.number_input(f"Consumo Estrada {nome_carro1} (km/l)", value=11.0)
-ipva_carro1 = st.sidebar.number_input(f"IPVA Anual {nome_carro1} (R$)", value=3000)
-seguro_carro1 = st.sidebar.number_input(f"Seguro Anual {nome_carro1} (R$)", value=3800)
-manutencao_carro1 = st.sidebar.number_input(f"Manutenção/Risco Anual {nome_carro1} (R$)", value=6000)
+# Custos recorrentes da compra
+ipva_anual = st.sidebar.number_input("IPVA + Licenciamento anual (R$)", value=4000)
+seguro_anual = st.sidebar.number_input("Seguro anual (R$)", value=3500)
+manutencao_anual = st.sidebar.number_input("Manutenção/Revisão anual (R$)", value=1500)
 
-st.sidebar.header("4. Carro Novo (Ex: BYD King)")
-nome_carro2 = st.sidebar.text_input("Nome Carro Novo", "BYD King GS")
-valor_compra_carro2 = st.sidebar.number_input("Preço de Compra (R$)", value=145000)
-consumo_ev_kwh = st.sidebar.number_input("Consumo Elétrico (kWh/100km)", value=14.0) # Aprox King
-consumo_hibrido_estrada = st.sidebar.number_input(f"Consumo Híbrido Estrada (km/l)", value=20.0)
-ipva_carro2 = st.sidebar.number_input(f"IPVA Anual {nome_carro2} (R$)", value=5800)
-seguro_carro2 = st.sidebar.number_input(f"Seguro Anual {nome_carro2} (R$)", value=7000)
-manutencao_carro2 = st.sidebar.number_input(f"Manutenção Anual {nome_carro2} (R$)", value=1000)
+st.sidebar.subheader("🏢 Cenário: Assinatura")
+mensalidade_assinatura = st.sidebar.number_input("Valor da mensalidade (R$)", value=2500)
+taxa_adesao = st.sidebar.number_input("Taxa de adesão/inicial (R$)", value=0)
 
 # --- CÁLCULOS ---
 
-# 1. Distâncias
-km_cidade = km_mensal * (pct_cidade / 100)
-km_estrada = km_mensal * (pct_estrada / 100)
+# 1. Cálculo Compra
+custo_recorrente_mensal_compra = (ipva_anual + seguro_anual + manutencao_anual) / 12
+valor_final_carro = valor_carro * ((1 - depreciacao_anual) ** (meses / 12))
 
-# 2. Custos Combustível Mensal - Carro 1 (Combustão)
-custo_cidade_c1 = (km_cidade / consumo_cidade_carro1) * preco_gasolina
-custo_estrada_c1 = (km_estrada / consumo_estrada_carro1) * preco_gasolina
-total_combustivel_c1_mensal = custo_cidade_c1 + custo_estrada_c1
+# Custo de oportunidade (se o valor da entrada estivesse investido)
+valor_investido_acumulado = entrada * ((1 + taxa_selic) ** meses)
+custo_oportunidade_entrada = valor_investido_acumulado - entrada
 
-# 3. Custos Combustível Mensal - Carro 2 (PHEV)
-# Assumindo cidade 100% elétrico e estrada híbrido
-custo_cidade_c2 = (km_cidade / 100) * consumo_ev_kwh * preco_kwh
-custo_estrada_c2 = (km_estrada / consumo_hibrido_estrada) * preco_gasolina
-total_combustivel_c2_mensal = custo_cidade_c2 + custo_estrada_c2
+total_gasto_compra = (custo_recorrente_mensal_compra * meses) + (valor_carro - entrada) # simplificado sem juros de financiamento
+total_perda_compra = (valor_carro - valor_final_carro) + (custo_recorrente_mensal_compra * meses) + custo_oportunidade_entrada
 
-# 4. Anualização
-custo_combustivel_c1_anual = total_combustivel_c1_mensal * 12
-custo_combustivel_c2_anual = total_combustivel_c2_mensal * 12
-economia_combustivel_anual = custo_combustivel_c1_anual - custo_combustivel_c2_anual
+# 2. Cálculo Assinatura
+total_gasto_assinatura = taxa_adesao + (mensalidade_assinatura * meses)
+# Custo de oportunidade da assinatura: O que você faria com o dinheiro da ENTRADA se não comprasse o carro
+rendimento_capital_na_assinatura = entrada * ((1 + taxa_selic) ** meses) - entrada
+custo_efetivo_assinatura = total_gasto_assinatura - rendimento_capital_na_assinatura
 
-# 5. Custos Fixos Totais
-fixo_c1 = ipva_carro1 + seguro_carro1 + manutencao_carro1
-fixo_c2 = ipva_carro2 + seguro_carro2 + manutencao_carro2
-delta_fixo = fixo_c2 - fixo_c1 # Quanto o Carro 2 é mais caro nos fixos (ou mais barato se negativo)
+# --- RESULTADOS ---
+col1, col2 = st.columns(2)
 
-# 6. Financeiro
-investimento_necessario = valor_compra_carro2 - valor_venda_carro1
-custo_oportunidade_anual = investimento_necessario * taxa_cdi
-
-# Resultado Final (Fluxo de Caixa Líquido Anual)
-# Economia Combustível + Economia Manutenção (já embutido no fixo) - Custo Fixo Extra - Custo Oportunidade
-beneficio_operacional_anual = economia_combustivel_anual - delta_fixo
-resultado_liquido_anual = beneficio_operacional_anual - custo_oportunidade_anual
-
-# ROE e Payback
-roe = (beneficio_operacional_anual / investimento_necessario) * 100 if investimento_necessario > 0 else 0
-payback_anos = investimento_necessario / beneficio_operacional_anual if beneficio_operacional_anual > 0 else 999
-
-# --- DASHBOARD VISUAL ---
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Economia Combustível (Mês)", f"R$ {total_combustivel_c1_mensal - total_combustivel_c2_mensal:,.2f}")
-col2.metric("Investimento Necessário", f"R$ {investimento_necessario:,.2f}")
-col3.metric("Resultado Final Anual", f"R$ {resultado_liquido_anual:,.2f}", 
-            delta_color="normal" if resultado_liquido_anual > 0 else "inverse",
-            help="Considera combustível, fixos, manutenção e custo de oportunidade do dinheiro.")
-
-st.divider()
-
-# --- VEREDITO ---
-st.subheader("🤖 Veredito da IA")
-
-cor_veredito = "red"
-texto_veredito = "MANTER O CARRO ATUAL"
-if resultado_liquido_anual > 0:
-    cor_veredito = "green"
-    texto_veredito = f"COMPRAR O {nome_carro2.upper()}"
-elif payback_anos < 8 and resultado_liquido_anual > -2000:
-    cor_veredito = "orange"
-    texto_veredito = f"COMPRA RACIONAL PELA SEGURANÇA (Custo financeiro baixo)"
-
-st.markdown(f"""
-    <div style="padding: 20px; background-color: {cor_veredito}; color: white; border-radius: 10px; text-align: center;">
-        <h2>{texto_veredito}</h2>
-        <p>ROE (Retorno Operacional): <b>{roe:.2f}%</b> a.a. | Payback Estimado: <b>{payback_anos:.1f} anos</b></p>
-    </div>
-""", unsafe_allow_html=True)
-
-if resultado_liquido_anual < 0:
-    st.warning(f"Nota: Financeiramente, você 'paga' R$ {abs(resultado_liquido_anual):.2f} por ano para ter o conforto/segurança do carro novo. Se esse valor for aceitável para você, ignore o financeiro puro.")
-
-st.divider()
-
-# --- GRÁFICOS ---
-tab1, tab2 = st.tabs(["Comparativo de Custos Anuais", "Curva de Payback (Tempo)"])
-
-with tab1:
-    # Gráfico de Barras Empilhadas (Composição do Custo)
-    dados_custo = pd.DataFrame({
-        "Carro": [nome_carro1, nome_carro2],
-        "Combustível": [custo_combustivel_c1_anual, custo_combustivel_c2_anual],
-        "Seguro/IPVA": [ipva_carro1 + seguro_carro1, ipva_carro2 + seguro_carro2],
-        "Manutenção/Risco": [manutencao_carro1, manutencao_carro2],
-        "Custo Oportunidade (Capital)": [0, custo_oportunidade_anual]
+with col1:
+    st.subheader("📊 Resumo de Custos (Total no Período)")
+    df_compra = pd.DataFrame({
+        "Categoria": ["Depreciação", "Manutenção/Taxas/Seguro", "Custo de Oportunidade"],
+        "Valor (R$)": [valor_carro - valor_final_carro, custo_recorrente_mensal_compra * meses, custo_oportunidade_entrada]
     })
-    
-    fig_bar = px.bar(dados_custo, x="Carro", y=["Combustível", "Seguro/IPVA", "Manutenção/Risco", "Custo Oportunidade (Capital)"],
-                     title="Composição do Custo Total Anual (TCO)",
-                     labels={"value": "Custo Anual (R$)", "variable": "Tipo de Despesa"})
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.write("**Custo Total da Compra:**")
+    st.write(f"R$ {total_perda_compra:,.2f}")
+    st.table(df_compra)
 
-with tab2:
-    # Gráfico de Linha (Payback)
-    anos = list(range(0, 11))
-    fluxo_acumulado = []
-    
-    saldo = -investimento_necessario
-    for ano in anos:
-        if ano == 0:
-            fluxo_acumulado.append(saldo)
-        else:
-            saldo += beneficio_operacional_anual # Adiciona a economia operacional anual
-            fluxo_acumulado.append(saldo)
-            
-    fig_line = go.Figure()
-    fig_line.add_trace(go.Scatter(x=anos, y=fluxo_acumulado, mode='lines+markers', name='Saldo Acumulado'))
-    fig_line.add_hline(y=0, line_dash="dash", line_color="green", annotation_text="Ponto de Equilíbrio (Zero)")
-    
-    fig_line.update_layout(title="Curva de Recuperação do Investimento (Sem considerar Rendimento Financeiro)",
-                           xaxis_title="Anos", yaxis_title="Saldo Financeiro (R$)")
-    st.plotly_chart(fig_line, use_container_width=True)
-    st.caption("*Este gráfico mostra em quanto tempo a economia de combustível/manutenção paga a diferença de preço do carro, ignorando juros compostos.")
+with col2:
+    st.subheader("📊 Resumo Assinatura")
+    df_assin_table = pd.DataFrame({
+        "Categoria": ["Mensalidades Totais", "Taxa de Adesão", "Rendimento do Capital (Ganho)"],
+        "Valor (R$)": [mensalidade_assinatura * meses, taxa_adesao, -rendimento_capital_na_assinatura]
+    })
+    st.write("**Custo Efetivo da Assinatura:**")
+    st.write(f"R$ {custo_efetivo_assinatura:,.2f}")
+    st.table(df_assin_table)
+
+# --- GRÁFICO ---
+st.divider()
+st.subheader("📈 Evolução do Custo Acumulado")
+
+meses_lista = list(range(1, meses + 1))
+custo_compra_evolucao = [
+    (valor_carro - (valor_carro * ((1 - depreciacao_anual) ** (m / 12)))) + 
+    (custo_recorrente_mensal_compra * m) + 
+    (entrada * ((1 + taxa_selic) ** m) - entrada)
+    for m in meses_lista
+]
+custo_assinatura_evolucao = [
+    (mensalidade_assinatura * m) + taxa_adesao - (entrada * ((1 + taxa_selic) ** m) - entrada)
+    for m in meses_lista
+]
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=meses_lista, y=custo_compra_evolucao, name="Custo Compra (Deprec + Taxas + Oportunidade)"))
+fig.add_trace(go.Scatter(x=meses_lista, y=custo_assinatura_evolucao, name="Custo Assinatura (Mensalidade - Rendimento)"))
+
+fig.update_layout(xaxis_title="Meses", yaxis_title="Custo Acumulado (R$)", hovermode="x unified")
+st.plotly_chart(fig, use_container_width=True)
+
+# --- CONCLUSÃO ---
+st.divider()
+if total_perda_compra < custo_efetivo_assinatura:
+    st.success(f"✅ Financeiramente, **COMPRAR** é mais vantajoso por uma diferença de R$ {custo_efetivo_assinatura - total_perda_compra:,.2f}")
+else:
+    st.success(f"✅ Financeiramente, **ASSINAR** é mais vantajoso por uma diferença de R$ {total_perda_compra - custo_efetivo_assinatura:,.2f}")
+
+st.info("""
+**Nota:** Este cálculo considera que o valor que você usaria para comprar o carro ficaria investido caso você optasse pela assinatura. 
+Se você não possui o dinheiro para comprar à vista e teria que financiar, a assinatura tende a ser ainda mais vantajosa devido aos juros bancários.
+""")
